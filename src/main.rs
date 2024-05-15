@@ -29,6 +29,11 @@ pub fn solution(input_path: &Path) -> Vec<ProcessedStation> {
     println!("Bytes: {:?}", bytes.len());
 
     for line in bytes.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            println!("Empty line");
+            continue;
+        }
+
         let line = std::str::from_utf8(line).unwrap();
 
         let Some((name, temp)) = line.split_once(';') else {
