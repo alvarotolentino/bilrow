@@ -25,12 +25,13 @@ pub fn solution(input_path: &Path) -> Vec<ProcessedStation> {
     };
 
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
-    let bytes: &[u8] = &mmap;
-    println!("Bytes: {:?}", bytes.len());
 
-    for line in bytes.split(|b| *b == b'\n') {
+    let mut last_pos = 0;
+    for next_pos in memchr::memchr_iter(b'\n', &mmap) {
+        let line = &mmap[last_pos..next_pos];
+        last_pos = next_pos + 1;
+
         if line.is_empty() {
-            println!("Empty line");
             continue;
         }
 
@@ -77,11 +78,13 @@ pub fn format_output(stations: &[ProcessedStation]) -> String {
     println!("count: {:?}", stations.len());
     output.push('{');
     for (i, station) in stations.iter().enumerate() {
-        let avg = station.avg_temp / station.avg_count as f32;
+        let min = station.min_temp / 10_f32;
+        let max = station.max_temp / 10_f32;
+        let avg = station.avg_temp / 10_f32 / station.avg_count as f32;
         let _ = write!(
             &mut output,
             "{}={:.1}/{:.1}/{:.1}",
-            station.name, station.min_temp, station.max_temp, avg
+            station.name, min, max, avg
         );
         if i != stations.len() - 1 {
             let _ = write!(&mut output, ", ");
@@ -103,8 +106,8 @@ fn main() -> io::Result<()> {
     let stations = solution(Path::new("data/measurements.txt"));
     let elapsed = start.elapsed();
 
-    println!("{}: {elapsed:?}", hash);
     let formatted = format_output(&stations);
     println!("{}", formatted);
+    println!("{}: {elapsed:?}", hash);
     Ok(())
 }
