@@ -1,5 +1,4 @@
 use hashbrown::HashMap;
-use std::fmt::Write;
 use std::fs::File;
 use std::{io, path::Path, process::Command, time::Instant};
 
@@ -43,25 +42,30 @@ pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
         let temp = unsafe { std::str::from_utf8_unchecked(&temp[1..]) };
         let temp: f32 = temp.parse::<f32>().unwrap();
         let name = unsafe { std::str::from_utf8_unchecked(name) };
-        let name = Box::from(name);
 
-        let station = station_map
-            .entry(name)
-            .or_insert_with(|| ProcessedStation {
-                min_temp: temp,
-                max_temp: temp,
-                avg_temp: temp,
-                avg_count: 1,
-            });
-
-        if temp < station.min_temp {
-            station.min_temp = temp;
+        match station_map.get_mut(name) {
+            Some(station) => {
+                if temp < station.min_temp {
+                    station.min_temp = temp;
+                }
+                if temp > station.max_temp {
+                    station.max_temp = temp;
+                }
+                station.avg_temp += temp;
+                station.avg_count += 1;
+            }
+            None => {
+                station_map.insert(
+                    name.into(),
+                    ProcessedStation {
+                        min_temp: temp,
+                        max_temp: temp,
+                        avg_temp: temp,
+                        avg_count: 1,
+                    },
+                );
+            }
         }
-        if temp > station.max_temp {
-            station.max_temp = temp;
-        }
-        station.avg_temp += temp;
-        station.avg_count += 1;
     }
 
     println!("Stations: {:?}", station_map.len());
@@ -73,14 +77,18 @@ pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
 
 pub fn format_output(stations: &HashMap<Box<str>, ProcessedStation>) -> String {
     let mut output = String::new();
+    output.reserve(1024); // Reserve space for the output string
 
     println!("count: {:?}", stations.len());
     output.push('{');
     stations.iter().for_each(|(name, station)| {
-        let min = station.min_temp;
-        let max = station.max_temp;
-        let avg = station.avg_temp / station.avg_count as f32;
-        let _ = write!(&mut output, "{}={:.1}/{:.1}/{:.1}, ", name, min, max, avg);
+        output.push_str(&format!(
+            "{}={:.1}/{:.1}/{:.1}, ",
+            name,
+            station.min_temp,
+            station.max_temp,
+            station.avg_temp / station.avg_count as f32
+        ));
     });
 
     output.push('}');
