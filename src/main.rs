@@ -1,18 +1,19 @@
+use hashbrown::HashMap;
 use std::fmt::Write;
 use std::fs::File;
 use std::{io, path::Path, process::Command, time::Instant};
 
 use memmap2::MmapOptions;
 pub struct ProcessedStation {
-    name: String,
     min_temp: f32,
     max_temp: f32,
     avg_temp: f32,
     avg_count: usize,
 }
 
-pub fn solution(input_path: &Path) -> Vec<ProcessedStation> {
-    let mut stations: Vec<ProcessedStation> = vec![];
+pub fn solution(input_path: &Path) -> HashMap<String, ProcessedStation> {
+    let mut station_map: HashMap<String, ProcessedStation> = HashMap::new();
+
     let file = File::open(input_path);
     let file = match file {
         Ok(file) => {
@@ -35,61 +36,51 @@ pub fn solution(input_path: &Path) -> Vec<ProcessedStation> {
             continue;
         }
 
-        let line = std::str::from_utf8(line).unwrap();
+        let separator = b';';
+        let index = line.iter().position(|&c| c == separator).unwrap();
 
-        let Some((name, temp)) = line.split_once(';') else {
-            panic!("Invalid line: {}", line);
-        };
+        let (name, temp) = line.split_at(index);
+        let temp = unsafe { std::str::from_utf8_unchecked(&temp[1..]) };
         let temp: f32 = temp.parse::<f32>().unwrap();
 
-        match stations.iter_mut().find(|s| s.name == name) {
-            Some(station) => {
-                if temp < station.min_temp {
-                    station.min_temp = temp;
-                }
-                if temp > station.max_temp {
-                    station.max_temp = temp;
-                }
-                station.avg_temp += temp;
-                station.avg_count += 1;
-            }
-            None => {
-                stations.push(ProcessedStation {
-                    name: name.to_owned(),
-                    min_temp: temp,
-                    max_temp: temp,
-                    avg_temp: temp,
-                    avg_count: 1,
-                });
-            }
+        let station = station_map
+            .entry(unsafe { std::str::from_utf8_unchecked(name) }.to_owned())
+            .or_insert_with(|| ProcessedStation {
+                min_temp: temp,
+                max_temp: temp,
+                avg_temp: temp,
+                avg_count: 1,
+            });
+
+        if temp < station.min_temp {
+            station.min_temp = temp;
         }
+        if temp > station.max_temp {
+            station.max_temp = temp;
+        }
+        station.avg_temp += temp;
+        station.avg_count += 1;
     }
 
-    println!("Stations: {:?}", stations.len());
-    stations.sort_unstable_by_key(|s| s.name.clone());
+    println!("Stations: {:?}", station_map.len());
+
     println!("Sorted stations");
 
-    stations
+    station_map
 }
 
-pub fn format_output(stations: &[ProcessedStation]) -> String {
+pub fn format_output(stations: &HashMap<String, ProcessedStation>) -> String {
     let mut output = String::new();
 
     println!("count: {:?}", stations.len());
     output.push('{');
-    for (i, station) in stations.iter().enumerate() {
-        let min = station.min_temp / 10_f32;
-        let max = station.max_temp / 10_f32;
-        let avg = station.avg_temp / 10_f32 / station.avg_count as f32;
-        let _ = write!(
-            &mut output,
-            "{}={:.1}/{:.1}/{:.1}",
-            station.name, min, max, avg
-        );
-        if i != stations.len() - 1 {
-            let _ = write!(&mut output, ", ");
-        }
-    }
+    stations.iter().for_each(|(name, station)| {
+        let min = station.min_temp;
+        let max = station.max_temp;
+        let avg = station.avg_temp / station.avg_count as f32;
+        let _ = write!(&mut output, "{}={:.1}/{:.1}/{:.1}, ", name, min, max, avg);
+    });
+
     output.push('}');
     output
 }
