@@ -11,8 +11,8 @@ pub struct ProcessedStation {
     avg_count: usize,
 }
 
-pub fn solution(input_path: &Path) -> HashMap<String, ProcessedStation> {
-    let mut station_map: HashMap<String, ProcessedStation> = HashMap::new();
+pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
+    let mut station_map: HashMap<Box<str>, ProcessedStation> = HashMap::new();
 
     let file = File::open(input_path);
     let file = match file {
@@ -42,9 +42,11 @@ pub fn solution(input_path: &Path) -> HashMap<String, ProcessedStation> {
         let (name, temp) = line.split_at(index);
         let temp = unsafe { std::str::from_utf8_unchecked(&temp[1..]) };
         let temp: f32 = temp.parse::<f32>().unwrap();
+        let name = unsafe { std::str::from_utf8_unchecked(name) };
+        let name = Box::from(name);
 
         let station = station_map
-            .entry(unsafe { std::str::from_utf8_unchecked(name) }.to_owned())
+            .entry(name)
             .or_insert_with(|| ProcessedStation {
                 min_temp: temp,
                 max_temp: temp,
@@ -69,7 +71,7 @@ pub fn solution(input_path: &Path) -> HashMap<String, ProcessedStation> {
     station_map
 }
 
-pub fn format_output(stations: &HashMap<String, ProcessedStation>) -> String {
+pub fn format_output(stations: &HashMap<Box<str>, ProcessedStation>) -> String {
     let mut output = String::new();
 
     println!("count: {:?}", stations.len());
