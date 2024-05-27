@@ -28,17 +28,16 @@ pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
 
     let mut last_pos = 0;
     for next_pos in memchr::memchr_iter(b'\n', &mmap) {
-        let line = &mmap[last_pos..next_pos];
+        let line: &[u8] = &mmap[last_pos..next_pos];
         last_pos = next_pos + 1;
 
         if line.is_empty() {
             continue;
         }
+        let separator = memchr::memchr(b';', line);
+        let (name, temp) = line.split_at(separator.unwrap());
 
-        let separator = b';';
-        let index = line.iter().position(|&c| c == separator).unwrap();
 
-        let (name, temp) = line.split_at(index);
         let temp = unsafe { std::str::from_utf8_unchecked(&temp[1..]) };
         let temp: f32 = temp.parse::<f32>().unwrap();
         let name = unsafe { std::str::from_utf8_unchecked(name) };
@@ -105,6 +104,7 @@ fn main() -> io::Result<()> {
 
     let start = Instant::now();
     let stations = solution(Path::new("data/measurements.txt"));
+    // let stations = solution_bufread(Path::new("data/measurements.txt"));
     let elapsed = start.elapsed();
 
     let formatted = format_output(&stations);
