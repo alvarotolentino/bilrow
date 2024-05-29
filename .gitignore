@@ -15,5 +15,5 @@ Cargo.lock
 *.pdb
 
 measurements.txt
-flamegraph.svg
-perf.data
+flamegraph*
+perf.data*

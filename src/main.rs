@@ -37,7 +37,6 @@ pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
         let separator = memchr::memchr(b';', line);
         let (name, temp) = line.split_at(separator.unwrap());
 
-
         let temp = unsafe { std::str::from_utf8_unchecked(&temp[1..]) };
         let temp: f32 = temp.parse::<f32>().unwrap();
         let name = unsafe { std::str::from_utf8_unchecked(name) };

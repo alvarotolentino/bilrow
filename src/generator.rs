@@ -2,10 +2,10 @@ use memmap2::MmapOptions;
 use rand::distributions::{Distribution, Uniform};
 use rayon::prelude::*;
 use std::env;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use std::time::Instant;
 
 fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
@@ -64,16 +64,15 @@ fn build_test_data(
     let coldest_temp: f32 = -99.9;
     let hottest_temp: f32 = 99.9;
 
-    let output = Arc::new(std::sync::Mutex::new(String::with_capacity(
-        num_rows_to_create,
-    )));
-
     let length = weather_station_names.len();
 
     let temp_range = Uniform::new(coldest_temp, hottest_temp);
     let station_range = Uniform::new(0, length);
 
     let start_time = Instant::now();
+    let mut file = BufWriter::new(File::create("data/measurements.txt")?);
+    let file_mutex = std::sync::Mutex::new(&mut file);
+
     (0..num_rows_to_create)
         .into_par_iter()
         .map_init(
@@ -82,33 +81,34 @@ fn build_test_data(
                 let station_index = station_range.sample(rng);
                 let temp = temp_range.sample(rng);
                 let name = &weather_station_names[station_index];
-                let value = &format!("{};{:.1}\n", name, temp);
-                output.lock().unwrap().push_str(value);
+                let line = &format!("{};{:.1}\n", name, temp);
+                let mut file = file_mutex.lock().unwrap();
+                writeln!(file, "{}", line).unwrap();
             },
         )
         .collect::<Vec<_>>();
     println!("gen output {:?}", start_time.elapsed());
 
-    let lenght = output.lock().unwrap().len();
-    println!("output lenght {:?}", lenght);
+    // let lenght = output.lock().unwrap().len();
+    // println!("output lenght {:?}", lenght);
 
-    let start_time = Instant::now();
-    let target = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open("data/measurements.txt")
-        .unwrap();
-    target.set_len(lenght as u64).unwrap();
+    // let start_time = Instant::now();
+    // let target = OpenOptions::new()
+    //     .read(true)
+    //     .write(true)
+    //     .create(true)
+    //     .truncate(true)
+    //     .open("data/measurements.txt")
+    //     .unwrap();
+    // target.set_len(lenght as u64).unwrap();
 
-    let mut mmap = unsafe { memmap2::MmapMut::map_mut(&target)? };
-    println!("mmap len {:?}", mmap.len());
+    // let mut mmap = unsafe { memmap2::MmapMut::map_mut(&target)? };
+    // println!("mmap len {:?}", mmap.len());
 
-    (&mut mmap[..])
-        .write_all(output.lock().unwrap().as_bytes())
-        .unwrap();
-    mmap.flush().unwrap();
+    // (&mut mmap[..])
+    //     .write_all(output.lock().unwrap().as_bytes())
+    //     .unwrap();
+    // mmap.flush().unwrap();
     println!("write output {:?}", start_time.elapsed());
 
     println!("Test data successfully written to data/measurements.txt");
