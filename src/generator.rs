@@ -19,7 +19,6 @@ fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
 }
 
 fn build_weather_station_name_list() -> Vec<String> {
-    let start_time = Instant::now();
     let mut current_dir: PathBuf = env::current_dir().unwrap();
     current_dir.push("data/weather_stations.csv");
 
@@ -52,15 +51,11 @@ fn build_weather_station_name_list() -> Vec<String> {
     name_set.iter().for_each(|name| {
         name_vec.push(name.to_owned());
     });
-    println!("build_weather_station_name_list {:?}", start_time.elapsed());
 
     name_vec
 }
 
-fn build_test_data(
-    weather_station_names: &Vec<String>,
-    num_rows_to_create: usize,
-) -> io::Result<()> {
+fn build_test_data(weather_station_names: &[String], num_rows_to_create: usize) -> io::Result<()> {
     let coldest_temp: f32 = -99.9;
     let hottest_temp: f32 = 99.9;
 
@@ -69,9 +64,13 @@ fn build_test_data(
     let temp_range = Uniform::new(coldest_temp, hottest_temp);
     let station_range = Uniform::new(0, length);
 
-    let start_time = Instant::now();
     let mut file = BufWriter::new(File::create("data/measurements.txt")?);
     let file_mutex = std::sync::Mutex::new(&mut file);
+
+    let precomputed_strings: Vec<_> = weather_station_names
+        .iter()
+        .map(|name| format!("{};", name).into_bytes())
+        .collect();
 
     (0..num_rows_to_create)
         .into_par_iter()
@@ -80,38 +79,19 @@ fn build_test_data(
             |rng, _| {
                 let station_index = station_range.sample(rng);
                 let temp = temp_range.sample(rng);
-                let name = &weather_station_names[station_index];
-                let line = &format!("{};{:.1}\n", name, temp);
-                let mut file = file_mutex.lock().unwrap();
-                writeln!(file, "{}", line).unwrap();
+                let mut line = precomputed_strings[station_index].clone();
+                line.extend_from_slice(format!("{:.1}\n", temp).as_bytes());
+                line
             },
         )
-        .collect::<Vec<_>>();
-    println!("gen output {:?}", start_time.elapsed());
+        .chunks(1000)
+        .for_each(|lines| {
+            let mut file = file_mutex.lock().unwrap();
 
-    // let lenght = output.lock().unwrap().len();
-    // println!("output lenght {:?}", lenght);
-
-    // let start_time = Instant::now();
-    // let target = OpenOptions::new()
-    //     .read(true)
-    //     .write(true)
-    //     .create(true)
-    //     .truncate(true)
-    //     .open("data/measurements.txt")
-    //     .unwrap();
-    // target.set_len(lenght as u64).unwrap();
-
-    // let mut mmap = unsafe { memmap2::MmapMut::map_mut(&target)? };
-    // println!("mmap len {:?}", mmap.len());
-
-    // (&mut mmap[..])
-    //     .write_all(output.lock().unwrap().as_bytes())
-    //     .unwrap();
-    // mmap.flush().unwrap();
-    println!("write output {:?}", start_time.elapsed());
-
-    println!("Test data successfully written to data/measurements.txt");
+            for line in lines {
+                file.write_all(&line[..]).unwrap();
+            }
+        });
 
     Ok(())
 }
@@ -119,8 +99,14 @@ fn build_test_data(
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let num_rows_to_create = check_args(args).expect("Invalid arguments");
+
+    let start_time = Instant::now();
     let weather_station_names = build_weather_station_name_list();
+    println!("build seed:{:?}", start_time.elapsed());
+
+    let start_time = Instant::now();
     build_test_data(&weather_station_names, num_rows_to_create)?;
-    println!("Test data build complete.");
+    println!("generate file:{:?}", start_time.elapsed());
+    println!("Test data successfully written to data/measurements.txt");
     Ok(())
 }

@@ -75,7 +75,7 @@ pub fn solution(input_path: &Path) -> HashMap<Box<str>, ProcessedStation> {
 
 pub fn format_output(stations: &HashMap<Box<str>, ProcessedStation>) -> String {
     let mut output = String::new();
-    output.reserve(1024); // Reserve space for the output string
+    output.reserve(1024);
 
     println!("count: {:?}", stations.len());
     output.push('{');
