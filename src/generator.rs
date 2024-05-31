@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use std::time::Instant;
 
+const COLDEST_TEMP: f32 = -99.9;
+const HOTTEST_TEMP: f32 = 99.9;
 fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     if args.len() != 2 {
         return Err("Usage: create_measurements <positive integer number of records to create>");
@@ -18,7 +20,7 @@ fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     }
 }
 
-fn build_weather_station_name_list() -> Vec<String> {
+fn build_weather_station_name_list() -> Vec<Vec<u8>> {
     let mut current_dir: PathBuf = env::current_dir().unwrap();
     current_dir.push("data/weather_stations.csv");
 
@@ -47,30 +49,20 @@ fn build_weather_station_name_list() -> Vec<String> {
         name_set.insert(name.into());
     }
 
-    let mut name_vec = Vec::with_capacity(name_set.len());
-    name_set.iter().for_each(|name| {
-        name_vec.push(name.to_owned());
-    });
-
-    name_vec
+    name_set
+        .drain()
+        .map(|name| format!("{};", name).into_bytes())
+        .collect()
 }
 
-fn build_test_data(weather_station_names: &[String], num_rows_to_create: usize) -> io::Result<()> {
-    let coldest_temp: f32 = -99.9;
-    let hottest_temp: f32 = 99.9;
-
+fn build_test_data(weather_station_names: &[Vec<u8>], num_rows_to_create: usize) -> io::Result<()> {
     let length = weather_station_names.len();
 
-    let temp_range = Uniform::new(coldest_temp, hottest_temp);
+    let temp_range = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
     let station_range = Uniform::new(0, length);
 
     let mut file = BufWriter::new(File::create("data/measurements.txt")?);
     let file_mutex = std::sync::Mutex::new(&mut file);
-
-    let precomputed_strings: Vec<_> = weather_station_names
-        .iter()
-        .map(|name| format!("{};", name).into_bytes())
-        .collect();
 
     (0..num_rows_to_create)
         .into_par_iter()
@@ -79,17 +71,18 @@ fn build_test_data(weather_station_names: &[String], num_rows_to_create: usize) 
             |rng, _| {
                 let station_index = station_range.sample(rng);
                 let temp = temp_range.sample(rng);
-                let mut line = precomputed_strings[station_index].clone();
-                line.extend_from_slice(format!("{:.1}\n", temp).as_bytes());
+                let mut line = Vec::with_capacity(1000);
+                line.extend_from_slice(&weather_station_names[station_index][..]);
+                writeln!(line, "{:.1}", temp).unwrap();
                 line
             },
         )
         .chunks(1000)
-        .for_each(|lines| {
+        .for_each(|lines: Vec<Vec<u8>>| {
             let mut file = file_mutex.lock().unwrap();
 
-            for line in lines {
-                file.write_all(&line[..]).unwrap();
+            for buffer in lines {
+                file.write_all(&buffer).unwrap();
             }
         });
 
