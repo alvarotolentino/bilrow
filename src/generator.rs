@@ -1,5 +1,7 @@
 use memmap2::MmapOptions;
 use rand::distributions::{Distribution, Uniform};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::env;
 use std::fs::File;
@@ -8,8 +10,11 @@ use std::path::PathBuf;
 
 use std::time::Instant;
 
-const COLDEST_TEMP: f32 = -99.9;
-const HOTTEST_TEMP: f32 = 99.9;
+static COLDEST_TEMP: f32 = -99.9;
+static HOTTEST_TEMP: f32 = 99.9;
+static BATCHES: u64 = 100_000;
+static SEED: u64 = 0;
+
 fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     if args.len() != 2 {
         return Err("Usage: create_measurements <positive integer number of records to create>");
@@ -56,6 +61,7 @@ fn build_weather_station_name_list() -> Vec<Vec<u8>> {
 }
 
 fn build_test_data(weather_station_names: &[Vec<u8>], num_rows_to_create: usize) -> io::Result<()> {
+    let batch_size = num_rows_to_create as u64 / BATCHES;
     let length = weather_station_names.len();
 
     let temp_range = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
@@ -64,26 +70,25 @@ fn build_test_data(weather_station_names: &[Vec<u8>], num_rows_to_create: usize)
     let mut file = BufWriter::new(File::create("data/measurements.txt")?);
     let file_mutex = std::sync::Mutex::new(&mut file);
 
-    (0..num_rows_to_create)
+    (0..BATCHES)
         .into_par_iter()
-        .map_init(
-            || rand::thread_rng(),
-            |rng, _| {
-                let station_index = station_range.sample(rng);
-                let temp = temp_range.sample(rng);
-                let mut line = Vec::with_capacity(1000);
-                line.extend_from_slice(&weather_station_names[station_index][..]);
-                writeln!(line, "{:.1}", temp).unwrap();
-                line
-            },
-        )
-        .chunks(1000)
-        .for_each(|lines: Vec<Vec<u8>>| {
-            let mut file = file_mutex.lock().unwrap();
+        .map(|i| {
+            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+            rng.set_stream(i);
 
-            for buffer in lines {
-                file.write_all(&buffer).unwrap();
+            let mut buffer: Vec<u8> = Vec::with_capacity(BATCHES as usize);
+            for _ in 0..batch_size {
+                let station_index = station_range.sample(&mut rng);
+                let temp = temp_range.sample(&mut rng);
+                buffer.extend_from_slice(&weather_station_names[station_index][..]);
+                write!(buffer, "{:.1}\n", temp).unwrap();
             }
+
+            buffer
+        })
+        .for_each(|buffer| {
+            let mut file = file_mutex.lock().unwrap();
+            file.write_all(&buffer).unwrap();
         });
 
     Ok(())
