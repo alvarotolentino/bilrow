@@ -40,7 +40,7 @@ fn build_weather_station_name_list() -> Vec<Vec<u8>> {
 
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
     let mut last_pos = 0;
-    let mut name_set: hashbrown::HashSet<String> = hashbrown::HashSet::new();
+    let mut name_set = hashbrown::HashSet::new();
     for next_pos in memchr::memchr_iter(b'\n', &mmap) {
         let line: &[u8] = &mmap[last_pos..next_pos];
         last_pos = next_pos + 1;
@@ -50,14 +50,10 @@ fn build_weather_station_name_list() -> Vec<Vec<u8>> {
         }
         let separator: usize = memchr::memchr(b';', line).unwrap();
         let line: &[u8] = &line[..separator];
-        let name = unsafe { std::str::from_utf8_unchecked(line) };
-        name_set.insert(name.into());
+        name_set.insert(line.to_owned());
     }
 
-    name_set
-        .drain()
-        .map(|name| format!("{};", name).into_bytes())
-        .collect()
+    name_set.drain().collect()
 }
 
 fn build_test_data(weather_station_names: &[Vec<u8>], num_rows_to_create: usize) -> io::Result<()> {
