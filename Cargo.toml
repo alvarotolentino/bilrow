@@ -13,16 +13,27 @@ path = "src/main.rs"
 name = "generator"
 path = "src/generator.rs"
 
+[lib]
+name = "generator"
+path = "src/generator.rs"
+
+[[bench]]
+name = "generator_bench"
+harness = false
+
 [dependencies]
+ahash = "0.8.11"
+criterion = "0.5.1"
 hashbrown = "0.14.5"
 memchr = "2.7.2"
 memmap2 = "0.9.4"
+num_cpus = "1.16.0"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 rayon = "1.10.0"
 
 [profile.release]
 debug = true
-lto = true
+lto = 'fat'
 codegen-units = 1
-opt-level = "z"
+opt-level = 3

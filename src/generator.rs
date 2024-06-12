@@ -1,19 +1,21 @@
 use memmap2::MmapOptions;
 use rand::distributions::{Distribution, Uniform};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
-use std::env;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::{
+    env,
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::PathBuf,
+    sync::Arc,
+    time::Instant,
+};
 
-use std::time::Instant;
+static COLDEST_TEMP: i16 = -999;
+static HOTTEST_TEMP: i16 = 999;
+static BATCHES: u64 = 10_000;
+static SOURCE_BUFFER_SIZE: usize = 40_000;
 
-static COLDEST_TEMP: f32 = -99.9;
-static HOTTEST_TEMP: f32 = 99.9;
-static BATCHES: u64 = 100_000;
-static SEED: u64 = 0;
+const MAP_TO_BYTE: [u8; 10] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'];
 
 fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     if args.len() != 2 {
@@ -25,7 +27,7 @@ fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     }
 }
 
-fn build_weather_station_name_list() -> Vec<Vec<u8>> {
+fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ahash::RandomState>) {
     let mut current_dir: PathBuf = env::current_dir().unwrap();
     current_dir.push("data/weather_stations.csv");
 
@@ -40,7 +42,7 @@ fn build_weather_station_name_list() -> Vec<Vec<u8>> {
 
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
     let mut last_pos = 0;
-    let mut name_set = hashbrown::HashSet::new();
+
     for next_pos in memchr::memchr_iter(b'\n', &mmap) {
         let line: &[u8] = &mmap[last_pos..next_pos];
         last_pos = next_pos + 1;
@@ -49,58 +51,80 @@ fn build_weather_station_name_list() -> Vec<Vec<u8>> {
             continue;
         }
         let separator: usize = memchr::memchr(b';', line).unwrap();
-        let line: &[u8] = &line[..separator];
-        name_set.insert(line.to_owned());
+        let line = &line[..separator];
+        name_set.insert(line.to_vec());
     }
-
-    name_set.drain().collect()
 }
 
-fn build_test_data(weather_station_names: &[Vec<u8>], num_rows_to_create: usize) -> io::Result<()> {
+#[inline]
+fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
+    let negative = temp < 0;
+    let temp = temp.abs();
+
+    let cents = if temp >= 100 { temp / 100 } else { 0 };
+
+    let tens = (temp / 10) % 10;
+    let units = temp % 10;
+
+    temp_vec.extend_from_slice(b";");
+
+    if negative {
+        temp_vec.extend_from_slice(b"-");
+    }
+
+    if cents > 0 {
+        temp_vec.push(MAP_TO_BYTE[cents as usize]);
+    }
+
+    temp_vec.push(MAP_TO_BYTE[tens as usize]);
+    temp_vec.extend_from_slice(b".");
+    temp_vec.push(MAP_TO_BYTE[units as usize]);
+    temp_vec.extend_from_slice(b"\n");
+}
+
+pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
     let batch_size = num_rows_to_create as u64 / BATCHES;
-    let length = weather_station_names.len();
+    let hasher = ahash::RandomState::default();
+    let mut name_set: hashbrown::HashSet<Vec<u8>, ahash::RandomState> =
+        hashbrown::HashSet::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hasher);
+    build_weather_station_name_list(&mut name_set);
+    let name_vec: Vec<Vec<u8>> = name_set.drain().collect();
 
-    let temp_range = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
-    let station_range = Uniform::new(0, length);
+    let temp_range: Uniform<i16> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
+    let index_range: Uniform<usize> = Uniform::new(0, name_vec.len() - 1);
 
-    let mut file = BufWriter::new(File::create("data/measurements.txt")?);
-    let file_mutex = std::sync::Mutex::new(&mut file);
+    let mut writer = BufWriter::new(File::create("data/measurements.txt")?);
+    let writer = Arc::new(std::sync::Mutex::new(&mut writer));
 
-    (0..BATCHES)
-        .into_par_iter()
-        .map(|i| {
-            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
-            rng.set_stream(i);
-
-            let mut buffer: Vec<u8> = Vec::with_capacity(BATCHES as usize);
+    (0..BATCHES).into_par_iter().for_each_init(
+        || rand::thread_rng(),
+        |rng, _| {
+            let mut buffer: Vec<u8> =
+                Vec::with_capacity(batch_size as usize * std::mem::size_of::<Vec<u8>>());
             for _ in 0..batch_size {
-                let station_index = station_range.sample(&mut rng);
-                let temp = temp_range.sample(&mut rng);
-                buffer.extend_from_slice(&weather_station_names[station_index][..]);
-                write!(buffer, "{:.1}\n", temp).unwrap();
+                let station_index = index_range.sample(rng);
+                let temp = temp_range.sample(rng);
+
+                buffer.extend_from_slice(&name_vec[station_index]);
+                append_bytes(temp, &mut buffer);
             }
 
-            buffer
-        })
-        .for_each(|buffer| {
-            let mut file = file_mutex.lock().unwrap();
-            file.write_all(&buffer).unwrap();
-        });
+            let mut writer = writer.lock().unwrap();
+            (*writer).write_all(&buffer).unwrap();
+            (*writer).flush().unwrap();
+        },
+    );
 
     Ok(())
 }
 
-fn main() -> io::Result<()> {
+pub fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let num_rows_to_create = check_args(args).expect("Invalid arguments");
 
-    let start_time = Instant::now();
-    let weather_station_names = build_weather_station_name_list();
-    println!("build seed:{:?}", start_time.elapsed());
-
-    let start_time = Instant::now();
-    build_test_data(&weather_station_names, num_rows_to_create)?;
-    println!("generate file:{:?}", start_time.elapsed());
+    let start = Instant::now();
+    build_test_data(num_rows_to_create)?;
+    println!("Time elapsed: {:?}", start.elapsed());
     println!("Test data successfully written to data/measurements.txt");
     Ok(())
 }
