@@ -10,8 +10,8 @@ use std::{
     time::Instant,
 };
 
-static COLDEST_TEMP: i16 = -999;
-static HOTTEST_TEMP: i16 = 999;
+static COLDEST_TEMP: f32 = -99.9;
+static HOTTEST_TEMP: f32 = 99.9;
 static BATCHES: u64 = 10_000;
 static SOURCE_BUFFER_SIZE: usize = 40_000;
 
@@ -56,8 +56,8 @@ fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ah
     }
 }
 
-#[inline]
-fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
+fn append_bytes(temp: f32, temp_vec: &mut Vec<u8>) {
+    let temp = (temp * 10.0) as i16;
     let negative = temp < 0;
     let temp = temp.abs();
 
@@ -66,10 +66,10 @@ fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
     let tens = (temp / 10) % 10;
     let units = temp % 10;
 
-    temp_vec.extend_from_slice(b";");
+    temp_vec.push(b';');
 
     if negative {
-        temp_vec.extend_from_slice(b"-");
+        temp_vec.push(b'-');
     }
 
     if cents > 0 {
@@ -77,9 +77,9 @@ fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
     }
 
     temp_vec.push(MAP_TO_BYTE[tens as usize]);
-    temp_vec.extend_from_slice(b".");
+    temp_vec.push(b'.');
     temp_vec.push(MAP_TO_BYTE[units as usize]);
-    temp_vec.extend_from_slice(b"\n");
+    temp_vec.push(b'\n');
 }
 
 pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
@@ -90,30 +90,33 @@ pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
     build_weather_station_name_list(&mut name_set);
     let name_vec: Vec<Vec<u8>> = name_set.drain().collect();
 
-    let temp_range: Uniform<i16> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
-    let index_range: Uniform<usize> = Uniform::new(0, name_vec.len() - 1);
+    let temp_range: Uniform<f32> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
+    let index_range: Uniform<u16> = Uniform::new(0, name_vec.len() as u16);
 
     let mut writer = BufWriter::new(File::create("data/measurements.txt")?);
     let writer = Arc::new(std::sync::Mutex::new(&mut writer));
+    let buffer: Vec<u8> = Vec::with_capacity(batch_size as usize * std::mem::size_of::<Vec<u8>>());
 
-    (0..BATCHES).into_par_iter().for_each_init(
-        || rand::thread_rng(),
-        |rng, _| {
-            let mut buffer: Vec<u8> =
-                Vec::with_capacity(batch_size as usize * std::mem::size_of::<Vec<u8>>());
+    (0..BATCHES)
+        .into_par_iter()
+        .for_each_with(buffer, |buffer, _| {
+            let mut rng = rand::thread_rng();
+            let rng = &mut rng;
+
             for _ in 0..batch_size {
                 let station_index = index_range.sample(rng);
                 let temp = temp_range.sample(rng);
 
-                buffer.extend_from_slice(&name_vec[station_index]);
-                append_bytes(temp, &mut buffer);
+                name_vec[station_index as usize].iter().for_each(|&c| buffer.push(c));
+
+                append_bytes(temp, buffer);
             }
 
             let mut writer = writer.lock().unwrap();
-            (*writer).write_all(&buffer).unwrap();
+            (*writer).write_all(buffer).unwrap();
             (*writer).flush().unwrap();
-        },
-    );
+            buffer.clear();
+        });
 
     Ok(())
 }

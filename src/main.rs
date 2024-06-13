@@ -19,7 +19,6 @@ pub fn split_file(num_threads: usize, data: &[u8]) -> Vec<usize> {
     split_points
 }
 
-#[inline]
 fn mapping_slice_to_f32(slice: &[u8]) -> f32 {
     let is_negative = slice[0] == b'-';
     let mut temp = 0.0;
@@ -52,7 +51,6 @@ fn mapping_slice_to_f32(slice: &[u8]) -> f32 {
     temp
 }
 
-#[inline]
 fn mapping_slice_to_f32_alt(slice: &[u8]) -> f32 {
     let s = std::str::from_utf8(slice).unwrap();
     s.parse::<f32>().unwrap()
