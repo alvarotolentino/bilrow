@@ -1,5 +1,9 @@
 use memmap2::MmapOptions;
-use rand::distributions::{Distribution, Uniform};
+use rand::{
+    distributions::{Distribution, Uniform},
+    SeedableRng,
+};
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::{
     env,
@@ -10,6 +14,7 @@ use std::{
     time::Instant,
 };
 
+static SEED: u64 = 0;
 static COLDEST_TEMP: f32 = -99.9;
 static HOTTEST_TEMP: f32 = 99.9;
 static BATCHES: u64 = 10_000;
@@ -99,15 +104,17 @@ pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
 
     (0..BATCHES)
         .into_par_iter()
-        .for_each_with(buffer, |buffer, _| {
-            let mut rng = rand::thread_rng();
-            let rng = &mut rng;
+        .for_each_with(buffer, |buffer, i| {
+            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+            rng.set_stream(i);
 
             for _ in 0..batch_size {
-                let station_index = index_range.sample(rng);
-                let temp = temp_range.sample(rng);
+                let station_index = index_range.sample(&mut rng);
+                let temp = temp_range.sample(&mut rng);
 
-                name_vec[station_index as usize].iter().for_each(|&c| buffer.push(c));
+                name_vec[station_index as usize]
+                    .iter()
+                    .for_each(|&c| buffer.push(c));
 
                 append_bytes(temp, buffer);
             }
