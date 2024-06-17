@@ -15,8 +15,8 @@ use std::{
 };
 
 static SEED: u64 = 0;
-static COLDEST_TEMP: f32 = -99.9;
-static HOTTEST_TEMP: f32 = 99.9;
+static COLDEST_TEMP: i16 = -999;
+static HOTTEST_TEMP: i16 = 999;
 static BATCHES: u64 = 10_000;
 static SOURCE_BUFFER_SIZE: usize = 40_000;
 
@@ -61,8 +61,7 @@ fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ah
     }
 }
 
-fn append_bytes(temp: f32, temp_vec: &mut Vec<u8>) {
-    let temp = (temp * 10.0) as i16;
+fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
     let negative = temp < 0;
     let temp = temp.abs();
 
@@ -95,12 +94,14 @@ pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
     build_weather_station_name_list(&mut name_set);
     let name_vec: Vec<Vec<u8>> = name_set.drain().collect();
 
-    let temp_range: Uniform<f32> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
+    let temp_range: Uniform<i16> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
     let index_range: Uniform<u16> = Uniform::new(0, name_vec.len() as u16);
 
-    let mut writer = BufWriter::new(File::create("data/measurements.txt")?);
+    let file = File::create("data/measurements.txt")?;
+    let mut writer = BufWriter::new(file);
+
     let writer = Arc::new(std::sync::Mutex::new(&mut writer));
-    let buffer: Vec<u8> = Vec::with_capacity(batch_size as usize * std::mem::size_of::<Vec<u8>>());
+    let buffer: Vec<u8> = Vec::with_capacity(batch_size as usize * std::mem::size_of::<u8>());
 
     (0..BATCHES)
         .into_par_iter()
@@ -112,14 +113,15 @@ pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
                 let station_index = index_range.sample(&mut rng);
                 let temp = temp_range.sample(&mut rng);
 
-                name_vec[station_index as usize]
-                    .iter()
-                    .for_each(|&c| buffer.push(c));
+                let iter = name_vec[station_index as usize].iter();
+                for c in iter {
+                    buffer.push(*c);
+                }
 
                 append_bytes(temp, buffer);
             }
 
-            let mut writer = writer.lock().unwrap();
+            let mut writer: std::sync::MutexGuard<&mut BufWriter<File>> = writer.lock().unwrap();
             (*writer).write_all(buffer).unwrap();
             (*writer).flush().unwrap();
             buffer.clear();

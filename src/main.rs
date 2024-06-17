@@ -5,55 +5,37 @@ use std::{io, path::Path, process::Command, time::Instant};
 
 use memmap2::MmapOptions;
 
-const MAP_TO_BYTE: [u8; 10] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'];
-//min_temp, max_temp, avg_temp, avg_count
-pub struct ProcessedStation(f32, f32, f32, usize);
+pub struct ProcessedStation(i16, i16, i16, usize);
 
 pub fn split_file(num_threads: usize, data: &[u8]) -> Vec<usize> {
     let mut split_points = Vec::with_capacity(num_threads);
     for i in 1..num_threads {
         let start = data.len() / num_threads * i;
         let new_line = memchr::memchr(b'\n', &data[start..]).unwrap();
-        split_points.push(start + new_line + 1);
+        let pos = start + new_line + 1;
+        split_points.push(pos);
     }
     split_points
 }
 
-fn mapping_slice_to_f32(slice: &[u8]) -> f32 {
+fn parse_to_i16(slice: &[u8]) -> i16 {
+    let mut temp = 0_i16;
     let is_negative = slice[0] == b'-';
-    let mut temp = 0.0;
-    let start = if is_negative { 1 } else { 0 };
 
-    for i in start..slice.len() {
-        let value = &slice[i];
-
-        if slice[i] == b'-' {
-            continue;
-        }
-        if slice[i] == b'.' {
-            let dec = &slice[i + 1];
-            let dec = MAP_TO_BYTE.iter().position(|&x| x == *dec).unwrap() as f32 / 10.0;
-            temp += dec;
-
-            break;
-        }
-
-        let value_pos = MAP_TO_BYTE.iter().position(|&x| x == *value).unwrap();
-        if temp == 0.0 {
-            temp = value_pos as f32;
-        } else {
-            temp = temp * 10.0 + value_pos as f32;
-        }
+    let mut pos = if is_negative { 1 } else { 0 };
+    temp += (slice[pos] - b'0') as i16;
+    pos += 1;
+    if slice[pos] != b'.' {
+        temp = (temp * 10) + (slice[pos] - b'0') as i16;
+        pos += 1;
     }
+    pos += 1;
+    temp = (temp * 10) + (slice[pos] - b'0') as i16;
     if is_negative {
-        temp *= -1.0;
+        -temp
+    } else {
+        temp
     }
-    temp
-}
-
-fn mapping_slice_to_f32_alt(slice: &[u8]) -> f32 {
-    let s = std::str::from_utf8(slice).unwrap();
-    s.parse::<f32>().unwrap()
 }
 
 pub fn thread(
@@ -76,7 +58,7 @@ pub fn thread(
         let semicolon_idx = memchr::memchr(b';', line).unwrap();
         let (name, temp) = line.split_at(semicolon_idx);
 
-        let temp = mapping_slice_to_f32(&temp[1..]);
+        let temp = parse_to_i16(&temp[1..]);
 
         match stations.get_mut(name) {
             Some(station) => {
@@ -133,7 +115,7 @@ pub fn solution(
     let file = File::open(input_path);
     let file = match file {
         Ok(file) => {
-            println!("File opened successfully");
+            eprintln!("File opened successfully");
             file
         }
         Err(e) => {
@@ -165,34 +147,34 @@ pub fn solution(
         .map(|t| t.join().unwrap())
         .collect::<Vec<_>>();
 
-    println!("thread processing: {:?}", start.elapsed());
+    eprintln!("thread processing: {:?}", start.elapsed());
 
     let start = Instant::now();
     merge_stations(&thread_data, station_map);
-    println!("Stations: {:?}", station_map.len());
-    println!("merge processing: {:?}", start.elapsed());
+    eprintln!("Stations: {:?}", station_map.len());
+    eprintln!("merge processing: {:?}", start.elapsed());
 
-    println!("Sorted stations");
+    eprintln!("Sorted stations");
 }
 
 pub fn format_output(stations: &hashbrown::HashMap<Vec<u8>, ProcessedStation>) -> String {
     let mut output = String::new();
-    output.reserve(1024);
+    output.reserve(output.len() * 4);
 
-    println!("count: {:?}", stations.len());
     output.push('{');
     stations.iter().for_each(|(name, station)| {
         let name = unsafe { std::str::from_utf8_unchecked(name) };
         output.push_str(&format!(
             "{}={:.1}/{:.1}/{:.1}, ",
             name,
-            station.0,
-            station.1,
-            station.2 / station.3 as f32
+            station.0 as f32 / 10.0,
+            station.1 as f32 / 10.0,
+            (station.2 as f32 / 10.0) / station.3 as f32
         ));
     });
 
     output.push('}');
+
     output
 }
 
@@ -208,7 +190,7 @@ fn main() -> io::Result<()> {
     let mut station_map: hashbrown::HashMap<Vec<u8>, ProcessedStation> = hashbrown::HashMap::new();
     solution(&mut station_map, Path::new("data/measurements.txt"));
 
-    // let output = format_output(&station_map);
+    let _ = format_output(&station_map);
     // println!("output: {}", output);
 
     println!("{} time: {:?}", hash, global_start.elapsed());
