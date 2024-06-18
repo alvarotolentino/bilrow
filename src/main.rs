@@ -5,14 +5,15 @@ use std::{io, path::Path, process::Command, time::Instant};
 
 use memmap2::MmapOptions;
 
+static SOURCE_BUFFER_SIZE: usize = 40_000;
 pub struct ProcessedStation(i16, i16, i16, usize);
 
 pub fn split_file(num_threads: usize, data: &[u8]) -> Vec<usize> {
     let mut split_points = Vec::with_capacity(num_threads);
     for i in 1..num_threads {
         let start = data.len() / num_threads * i;
-        let new_line = memchr::memchr(b'\n', &data[start..]).unwrap();
-        let pos = start + new_line + 1;
+        let nearest_new_line = memchr::memchr(b'\n', &data[start..]).unwrap();
+        let pos = start + nearest_new_line + 1;
         split_points.push(pos);
     }
     split_points
@@ -126,9 +127,13 @@ pub fn solution(
     let start = Instant::now();
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
     let data: Arc<memmap2::Mmap> = Arc::new(mmap);
+    eprintln!("mmap: {:?}", start.elapsed());
 
+    let start = Instant::now();
     let split_points = split_file(num_threads, &data);
+    eprintln!("split: {:?}", start.elapsed());
 
+    let start = Instant::now();
     let threads: Vec<_> = (0..split_points.len())
         .map(|i| {
             let data = Arc::clone(&data);
@@ -187,7 +192,8 @@ fn main() -> io::Result<()> {
     let hash = String::from_utf8(hash.stdout).expect("Invalid UTF-8");
     let hash = hash.trim();
 
-    let mut station_map: hashbrown::HashMap<Vec<u8>, ProcessedStation> = hashbrown::HashMap::new();
+    let hash_builder = hashbrown::hash_map::DefaultHashBuilder::default();
+    let mut station_map: hashbrown::HashMap<Vec<u8>, ProcessedStation> = hashbrown::HashMap::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hash_builder);
     solution(&mut station_map, Path::new("data/measurements.txt"));
 
     let _ = format_output(&station_map);
