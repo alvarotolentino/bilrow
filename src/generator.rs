@@ -1,9 +1,4 @@
 use memmap2::MmapOptions;
-use rand::{
-    distributions::{Distribution, Uniform},
-    SeedableRng,
-};
-use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::{
     env,
@@ -14,10 +9,9 @@ use std::{
     time::Instant,
 };
 
-static SEED: u64 = 0;
 static COLDEST_TEMP: i16 = -999;
 static HOTTEST_TEMP: i16 = 999;
-static BATCHES: u64 = 10_000;
+static BATCHES: u64 = 100;
 static SOURCE_BUFFER_SIZE: usize = 40_000;
 
 const MAP_TO_BYTE: [u8; 10] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'];
@@ -61,64 +55,49 @@ fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ah
     }
 }
 
-fn append_bytes(temp: i16, temp_vec: &mut Vec<u8>) {
-    let negative = temp < 0;
-    let temp = temp.abs();
-
-    let cents = if temp >= 100 { temp / 100 } else { 0 };
-
-    let tens = (temp / 10) % 10;
-    let units = temp % 10;
-
-    temp_vec.push(b';');
-
-    if negative {
-        temp_vec.push(b'-');
-    }
-
-    if cents > 0 {
-        temp_vec.push(MAP_TO_BYTE[cents as usize]);
-    }
-
-    temp_vec.push(MAP_TO_BYTE[tens as usize]);
-    temp_vec.push(b'.');
-    temp_vec.push(MAP_TO_BYTE[units as usize]);
-    temp_vec.push(b'\n');
-}
-
 pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
-    let batch_size = num_rows_to_create as u64 / BATCHES;
+
+    let batch_size = num_rows_to_create / BATCHES as usize;
     let hasher = ahash::RandomState::default();
     let mut name_set: hashbrown::HashSet<Vec<u8>, ahash::RandomState> =
         hashbrown::HashSet::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hasher);
     build_weather_station_name_list(&mut name_set);
     let name_vec: Vec<Vec<u8>> = name_set.drain().collect();
 
-    let temp_range: Uniform<i16> = Uniform::new(COLDEST_TEMP, HOTTEST_TEMP);
-    let index_range: Uniform<u16> = Uniform::new(0, name_vec.len() as u16);
-
     let file = File::create("data/measurements.txt")?;
     let mut writer = BufWriter::new(file);
 
     let writer = Arc::new(std::sync::Mutex::new(&mut writer));
-    let buffer: Vec<u8> = Vec::with_capacity(batch_size as usize * std::mem::size_of::<u8>());
+    let buffer: Vec<u8> = Vec::with_capacity(batch_size * std::mem::size_of::<u8>());
 
     (0..BATCHES)
         .into_par_iter()
-        .for_each_with(buffer, |buffer, i| {
-            let mut rng = ChaCha8Rng::seed_from_u64(SEED);
-            rng.set_stream(i);
-
+        .for_each_with(buffer, |buffer, _| {
             for _ in 0..batch_size {
-                let station_index = index_range.sample(&mut rng);
-                let temp = temp_range.sample(&mut rng);
+                let station_index = fastrand::usize(0..name_vec.len());
+                let temp = fastrand::i16(COLDEST_TEMP..=HOTTEST_TEMP);
+                let negative = temp < 0;
+                let temp = temp.abs();
+                let cents = temp / 100;
+                let tens = (temp / 10) % 10;
+                let units = temp % 10;
 
-                let iter = name_vec[station_index as usize].iter();
-                for c in iter {
-                    buffer.push(*c);
+                buffer.extend_from_slice(&name_vec[station_index as usize]);
+
+                buffer.push(b';');
+
+                if negative {
+                    buffer.push(b'-');
                 }
 
-                append_bytes(temp, buffer);
+                if cents > 0 {
+                    buffer.push(MAP_TO_BYTE[cents as usize]);
+                }
+
+                buffer.push(MAP_TO_BYTE[tens as usize]);
+                buffer.push(b'.');
+                buffer.push(MAP_TO_BYTE[units as usize]);
+                buffer.push(b'\n');
             }
 
             let mut writer: std::sync::MutexGuard<&mut BufWriter<File>> = writer.lock().unwrap();
