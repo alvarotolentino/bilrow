@@ -11,7 +11,7 @@ use std::{
 
 static COLDEST_TEMP: i16 = -999;
 static HOTTEST_TEMP: i16 = 999;
-static BATCHES: u64 = 100;
+static BATCHES: u64 = 1_000;
 static SOURCE_BUFFER_SIZE: usize = 40_000;
 
 const MAP_TO_BYTE: [u8; 10] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'];
@@ -26,7 +26,7 @@ fn check_args(args: Vec<String>) -> Result<usize, &'static str> {
     }
 }
 
-fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ahash::RandomState>) {
+fn build_weather_station_name_list(name_set: &mut gxhash::HashSet<Vec<u8>>) {
     let mut current_dir: PathBuf = env::current_dir().unwrap();
     current_dir.push("data/weather_stations.csv");
 
@@ -45,10 +45,10 @@ fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ah
     for next_pos in memchr::memchr_iter(b'\n', &mmap) {
         let line: &[u8] = &mmap[last_pos..next_pos];
         last_pos = next_pos + 1;
-
         if line.is_empty() {
             continue;
-        }
+            }
+
         let separator: usize = memchr::memchr(b';', line).unwrap();
         let line = &line[..separator];
         name_set.insert(line.to_vec());
@@ -56,11 +56,10 @@ fn build_weather_station_name_list(name_set: &mut hashbrown::HashSet<Vec<u8>, ah
 }
 
 pub fn build_test_data(num_rows_to_create: usize) -> io::Result<()> {
-
     let batch_size = num_rows_to_create / BATCHES as usize;
-    let hasher = ahash::RandomState::default();
-    let mut name_set: hashbrown::HashSet<Vec<u8>, ahash::RandomState> =
-        hashbrown::HashSet::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hasher);
+    let hasher = gxhash::GxBuildHasher::default();
+    let mut name_set: gxhash::HashSet<Vec<u8>> =
+        gxhash::HashSet::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hasher);
     build_weather_station_name_list(&mut name_set);
     let name_vec: Vec<Vec<u8>> = name_set.drain().collect();
 

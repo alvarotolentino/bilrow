@@ -1,14 +1,12 @@
+use memmap2::MmapOptions;
 use std::fs::File;
-
 use std::sync::Arc;
 use std::{io, path::Path, process::Command, time::Instant};
-
-use memmap2::MmapOptions;
-
 static SOURCE_BUFFER_SIZE: usize = 40_000;
+
 pub struct ProcessedStation(i16, i16, i16, usize);
 
-pub fn split_file(num_threads: usize, data: &[u8]) -> Vec<usize> {
+pub fn split_file(num_threads: usize, data: &memmap2::Mmap) -> Vec<usize> {
     let mut split_points = Vec::with_capacity(num_threads);
     for i in 1..num_threads {
         let start = data.len() / num_threads * i;
@@ -23,7 +21,11 @@ fn parse_to_i16(slice: &[u8]) -> i16 {
     let mut temp = 0_i16;
     let is_negative = slice[0] == b'-';
 
-    let mut pos = if is_negative { 1 } else { 0 };
+    let mut pos = 0;
+    if is_negative {
+        pos += 1;
+    };
+
     temp += (slice[pos] - b'0') as i16;
     pos += 1;
     if slice[pos] != b'.' {
@@ -43,8 +45,13 @@ pub fn thread(
     data: Arc<memmap2::Mmap>,
     start_idx: usize,
     end_idx: usize,
-) -> hashbrown::HashMap<Vec<u8>, ProcessedStation> {
-    let mut stations: hashbrown::HashMap<Vec<u8>, ProcessedStation> = hashbrown::HashMap::new();
+) -> gxhash::HashMap<Vec<u8>, ProcessedStation> {
+    let hash_builder = gxhash::GxBuildHasher::default();
+    let mut stations: gxhash::HashMap<Vec<u8>, ProcessedStation> =
+        gxhash::HashMap::with_capacity_and_hasher(
+            SOURCE_BUFFER_SIZE / rayon::current_num_threads(),
+            hash_builder,
+        );
 
     let mut last_pos = 0;
     let data = &data[start_idx..end_idx];
@@ -73,7 +80,7 @@ pub fn thread(
                 station.3 += 1;
             }
             None => {
-                stations.insert(name.into(), ProcessedStation(temp, temp, temp, 1));
+                stations.insert(name.to_owned(), ProcessedStation(temp, temp, temp, 1));
             }
         }
     }
@@ -81,8 +88,8 @@ pub fn thread(
 }
 
 pub fn merge_stations(
-    thread_data: &Vec<hashbrown::HashMap<Vec<u8>, ProcessedStation>>,
-    station_map: &mut hashbrown::HashMap<Vec<u8>, ProcessedStation>,
+    thread_data: &Vec<gxhash::HashMap<Vec<u8>, ProcessedStation>>,
+    station_map: &mut gxhash::HashMap<Vec<u8>, ProcessedStation>,
 ) {
     for data in thread_data {
         for (name, station) in data {
@@ -109,10 +116,10 @@ pub fn merge_stations(
 }
 
 pub fn solution(
-    station_map: &mut hashbrown::HashMap<Vec<u8>, ProcessedStation>,
+    station_map: &mut gxhash::HashMap<Vec<u8>, ProcessedStation>,
     input_path: &Path,
 ) {
-    let num_threads = rayon::current_num_threads();
+    let number_of_threads = rayon::current_num_threads();
     let file = File::open(input_path);
     let file = match file {
         Ok(file) => {
@@ -130,7 +137,7 @@ pub fn solution(
     eprintln!("mmap: {:?}", start.elapsed());
 
     let start = Instant::now();
-    let split_points = split_file(num_threads, &data);
+    let split_points = split_file(number_of_threads, &data);
     eprintln!("split: {:?}", start.elapsed());
 
     let start = Instant::now();
@@ -147,7 +154,7 @@ pub fn solution(
         })
         .collect();
 
-    let thread_data: Vec<hashbrown::HashMap<Vec<u8>, ProcessedStation>> = threads
+    let thread_data: Vec<gxhash::HashMap<Vec<u8>, ProcessedStation>> = threads
         .into_iter()
         .map(|t| t.join().unwrap())
         .collect::<Vec<_>>();
@@ -162,20 +169,22 @@ pub fn solution(
     eprintln!("Sorted stations");
 }
 
-pub fn format_output(stations: &hashbrown::HashMap<Vec<u8>, ProcessedStation>) -> String {
+pub fn format_output(stations: &gxhash::HashMap<Vec<u8>, ProcessedStation>) -> String {
     let mut output = String::new();
-    output.reserve(output.len() * 4);
+    output.reserve(output.len() * 50);
 
     output.push('{');
     stations.iter().for_each(|(name, station)| {
+        use std::fmt::Write;
         let name = unsafe { std::str::from_utf8_unchecked(name) };
-        output.push_str(&format!(
+        let _ = write!(
+            &mut output,
             "{}={:.1}/{:.1}/{:.1}, ",
             name,
             station.0 as f32 / 10.0,
             station.1 as f32 / 10.0,
             (station.2 as f32 / 10.0) / station.3 as f32
-        ));
+        );
     });
 
     output.push('}');
@@ -192,12 +201,12 @@ fn main() -> io::Result<()> {
     let hash = String::from_utf8(hash.stdout).expect("Invalid UTF-8");
     let hash = hash.trim();
 
-    let hash_builder = hashbrown::hash_map::DefaultHashBuilder::default();
-    let mut station_map: hashbrown::HashMap<Vec<u8>, ProcessedStation> = hashbrown::HashMap::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hash_builder);
+    let hash_builder = gxhash::GxBuildHasher::default();
+    let mut station_map: gxhash::HashMap<Vec<u8>, ProcessedStation> =
+    gxhash::HashMap::with_capacity_and_hasher(SOURCE_BUFFER_SIZE, hash_builder);
     solution(&mut station_map, Path::new("data/measurements.txt"));
 
     let _ = format_output(&station_map);
-    // println!("output: {}", output);
 
     println!("{} time: {:?}", hash, global_start.elapsed());
     Ok(())

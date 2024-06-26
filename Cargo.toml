@@ -22,10 +22,9 @@ name = "generator_bench"
 harness = false
 
 [dependencies]
-ahash = "0.8.11"
 criterion = "0.5.1"
 fastrand = "2.1.0"
-hashbrown = "0.14.5"
+gxhash = "3.4.1"
 memchr = "2.7.2"
 memmap2 = "0.9.4"
 num_cpus = "1.16.0"
