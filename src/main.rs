@@ -20,8 +20,8 @@ pub fn split_file(num_threads: usize, data: &memmap2::Mmap) -> Vec<usize> {
         let nearest_new_line: usize;
 
         #[cfg(target_feature = "avx2")]
-        {
-            nearest_new_line = search_u8_avx2(&data[start..], NEW_LINE_BYTE).unwrap();
+        unsafe {
+            nearest_new_line = search_u8_avx2(data.get_unchecked(start..), NEW_LINE_BYTE).unwrap();
         }
 
         #[cfg(not(target_feature = "avx2"))]
@@ -173,10 +173,16 @@ pub fn thread(
         );
     let mut last_pos = 0;
 
-    let data = &data[start_idx..end_idx];
+    let chunk: &[u8];
+    unsafe {
+        chunk = data.get_unchecked(start_idx..end_idx);
+    }
 
-    for next_pos in memchr::memchr_iter(b'\n', data) {
-        let line: &[u8] = &data[last_pos..next_pos];
+    for next_pos in memchr::memchr_iter(b'\n', chunk) {
+        let line: &[u8];
+        unsafe {
+            line = chunk.get_unchecked(last_pos..next_pos);
+        }
         last_pos = next_pos + 1;
 
         if line.is_empty() {
@@ -194,13 +200,17 @@ pub fn thread(
             semicolon_idx = memchr::memchr(SEMICOLON_BYTE, line).unwrap();
         }
 
-        let (name, temp) = line.split_at(semicolon_idx);
-
+        let name: &[u8];
+        let temp: &[u8];
+        unsafe {
+            name = line.get_unchecked(..semicolon_idx);
+            temp = line.get_unchecked(semicolon_idx + 1..);
+        }
 
         let value: i16;
         #[cfg(target_feature = "sse2")]
         {
-            value = parse_to_i16_simd(&temp[1..]);
+            value = parse_to_i16_simd(temp);
         }
 
         #[cfg(not(target_feature = "sse2"))]
@@ -220,7 +230,16 @@ pub fn thread(
                 station.3 += 1;
             }
             None => {
-                stations.insert(name.to_owned(), ProcessedStation(value, value, value, 1));
+                let len = name.len();
+                let mut destination = Vec::with_capacity(len);
+                let dst_prt = destination.as_mut_ptr();
+                let src_ptr = name.as_ptr();
+                unsafe {
+                    std::ptr::copy_nonoverlapping(src_ptr, dst_prt, len);
+                    destination.set_len(len);
+                }
+
+                stations.insert(destination, ProcessedStation(value, value, value, 1));
             }
         }
     }
@@ -245,8 +264,16 @@ pub fn merge_stations(
                     s.3 += station.3;
                 }
                 None => {
+                    let len = name.len();
+                    let mut destination = Vec::with_capacity(len);
+                    let dst_prt = destination.as_mut_ptr();
+                    let src_ptr = name.as_ptr();
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_ptr, dst_prt, len);
+                        destination.set_len(len);
+                    }
                     station_map.insert(
-                        name.to_vec(),
+                        destination,
                         ProcessedStation(station.0, station.1, station.2, station.3),
                     );
                 }
@@ -307,6 +334,7 @@ pub fn solution(station_map: &mut gxhash::HashMap<Vec<u8>, ProcessedStation>, in
 }
 
 pub fn format_output(stations: &gxhash::HashMap<Vec<u8>, ProcessedStation>) -> String {
+    let start = Instant::now();
     let mut output = String::new();
     output.reserve(output.len() * 50);
 
@@ -325,6 +353,7 @@ pub fn format_output(stations: &gxhash::HashMap<Vec<u8>, ProcessedStation>) -> S
     });
 
     output.push('}');
+    eprintln!("format_output: {:?}", start.elapsed());
 
     output
 }
@@ -365,7 +394,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_feature = "sse2")]
     #[cfg(target_feature = "sse2")]
     fn test_parse_to_i16_simd() {
         assert_eq!(parse_to_i16_simd(b"0.1"), 1);
